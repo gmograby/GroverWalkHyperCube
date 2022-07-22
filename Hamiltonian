@@ -1,0 +1,169 @@
+import networkx as nx
+import scipy as sp
+import numpy as np
+
+
+# length of hypercube side is 4 vertices
+sideLength = 4
+
+
+# choose the transition probability
+const = 0.5
+p = [const, const, const, const, const, const, const, const, const, const]
+
+
+
+
+
+
+
+# define the m function for the p Laplacian
+def m(v):
+    m=0
+    while (v>0) and (v%3==0):
+        m=m+1
+        v=v/3
+    return m
+
+
+
+
+
+
+
+# generate the probabilistic graph Laplacian in one direction
+def SinglesidesLaplaciansSparse( sideLength = 4, p = 1/2):
+    
+    J = sp.sparse.eye(sideLength)
+    JL = J.tolil()
+    
+    JL[0,1]=-1
+    JL[sideLength-1,sideLength-2]=-1
+    for v in range(1,sideLength-1):
+        if 3**(-m(v))*v % 3 == 1:
+            JL[v,v-1] = -(1-p)
+            JL[v, v+1] = -p
+        else:
+            JL[v,v-1] = -p
+            JL[v, v+1] = -(1-p)
+    
+
+    J = JL.tocsr()
+    
+    return J
+
+
+
+
+
+
+# generate the probabilistic graph Laplacian in all directions
+def sidesLaplaciansSparse( sideLength = sideLength, p = p):
+    
+    J1 = sp.sparse.eye(sideLength)
+    J2 = sp.sparse.eye(sideLength)
+    J3 = sp.sparse.eye(sideLength)
+    J4 = sp.sparse.eye(sideLength)
+    J5 = sp.sparse.eye(sideLength)
+    J6 = sp.sparse.eye(sideLength)
+    J7 = sp.sparse.eye(sideLength)
+    J8 = sp.sparse.eye(sideLength)
+    J9 = sp.sparse.eye(sideLength)
+    J10 = sp.sparse.eye(sideLength)
+    J = [J1,J2,J3,J4,J5,J6,J7,J8,J9,J10]
+    
+    for i in range(10):
+        J[i]= SinglesidesLaplaciansSparse( sideLength = sideLength, p = p[i])
+
+    
+    return J
+
+
+
+# generate the symmetrizing inner product
+def sparseJacobiInnerProduct(J , piZero = 1):
+    
+    JL = J.tolil()
+    metricL = sp.sparse.csr_matrix(J.shape).tolil()
+    metricL[0,0] = piZero
+    
+
+    
+    for v in range(1,J.shape[0]):
+        metricL[v,v] = (metricL[v-1,v-1]*(JL[v-1,v]))/(JL[v,v-1])
+    
+    metric = metricL.tocsr()
+    
+    return metric
+
+
+
+
+
+
+
+dimOfG = 5
+
+dim5 = [sideLength,sideLength,sideLength,sideLength,sideLength]
+G = nx.grid_graph(dim=dim5)  # [...,z,y,x]
+nodes = list(G.nodes())
+nodes.sort()
+
+
+
+J = sidesLaplaciansSparse( sideLength = sideLength, p = p)
+I = sp.sparse.eye(sideLength)
+
+
+M0 = sp.sparse.kron(J[0],sp.sparse.kron(I,sp.sparse.kron(I, sp.sparse.kron(I,I))))
+M1 = sp.sparse.kron(I,sp.sparse.kron(J[1],sp.sparse.kron(I, sp.sparse.kron(I,I))))
+M2 = sp.sparse.kron(I,sp.sparse.kron(I,sp.sparse.kron(J[2], sp.sparse.kron(I,I))))
+M3 = sp.sparse.kron(I,sp.sparse.kron(I,sp.sparse.kron(I, sp.sparse.kron(J[3],I))))
+M4 = sp.sparse.kron(I,sp.sparse.kron(I,sp.sparse.kron(I, sp.sparse.kron(I,J[4]))))
+
+Lap = (1/dimOfG)*(M0 + M1 + M2 + M3 + M4)
+Lap.data=np.round(Lap.data,10)
+
+
+
+
+
+metricJ = [sparseJacobiInnerProduct(J= Ji, piZero = 1) for Ji in J]
+metric = sp.sparse.kron(metricJ[0],sp.sparse.kron(metricJ[1],sp.sparse.kron(metricJ[2], sp.sparse.kron(metricJ[3],metricJ[4]))))
+metricInv = sp.sparse.linalg.inv(metric)
+
+
+oneLise = [1 for i in range(sideLength**dimOfG)]
+sVecT = sp.sparse.csr_matrix(oneLise)
+sVec = sVecT.T
+normSquared = ((sVec).transpose()@metric@sVec)[0,0]
+norm = np.sqrt(normSquared)
+S=(1/norm)*sVec
+S.todense()
+
+
+zeroLise = [0 for i in range(sideLength**dimOfG)]
+wVecT = sp.sparse.csr_matrix(zeroLise)
+W = wVecT.T
+WL = sp.sparse.csr_matrix((sideLength**dimOfG, 1)).tolil()
+
+#w = randrange(sideLength**dimOfG)
+w=3
+print('the target vertex is ', w, 'which is the vertex', nodes[w])
+WL[w,0]=1
+
+Wtilde = WL.tocsr()
+WnormSquared = ((Wtilde).transpose()@metric@Wtilde)[0,0]
+Wnorm = np.sqrt(WnormSquared)
+W=(1/Wnorm)*Wtilde
+#W.todense()
+
+Proj = W*(W.transpose()*metric)
+#Proj.todense()
+
+gamma = 1
+
+H = Lap.multiply(gamma)-Proj
+#H.todense()
+
+Wt = W.reshape(1,sideLength**dimOfG)
